@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QFrame, QSizePolicy, QTextEdit
 )
 
-from ui.tokens import C, font_hud, font_tech
+from ui.tokens import C, font_hud, font_tech, font_body
 from ui.components.ai_core import AICore
 from ui.components.system_monitor import SystemMonitorPanel
 from ui.components.activity_log import ActivityLog
