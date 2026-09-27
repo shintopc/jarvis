@@ -156,12 +156,69 @@ def _ddg_news(query: str, max_results: int = 8) -> list[dict]:
                     "source":  r.get("source", ""),
                 })
     except Exception as e:
-        print(f"[WebSearch] ⚠️ DDG news() failed ({e}) — falling back to text search")
+        print(f"[WebSearch] DDG news() failed ({e}) - falling back to text search")
     # Also covers the legacy-package case, where news() returns an empty list
     # instead of raising.
     if not results:
         results = _ddg_search(query, max_results=max_results)
     return results
+
+
+def _fetch_malayalam_news(max_results: int = 10) -> list[dict]:
+    """
+    Fetches real-time Malayalam news across top Kerala portals (Asianet News,
+    Manorama Online, Mathrubhumi, Madhyamam, 24 News, Deshabhimani, etc.).
+    """
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    import html
+
+    url = "https://news.google.com/rss?hl=ml&gl=IN&ceid=IN:ml"
+    results = []
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=6.0) as resp:
+            data = resp.read()
+            root = ET.fromstring(data)
+            for item in root.findall(".//item")[:max_results]:
+                raw_title = html.unescape(item.findtext("title", "")).strip()
+                source = html.unescape(item.findtext("source", "")).strip()
+                if " - " in raw_title:
+                    title = raw_title.rsplit(" - ", 1)[0].strip()
+                    if not source:
+                        source = raw_title.rsplit(" - ", 1)[1].strip()
+                else:
+                    title = raw_title
+
+                pub_date = item.findtext("pubDate", "").strip()
+                time_str = ""
+                if pub_date:
+                    try:
+                        parts = pub_date.split()
+                        if len(parts) >= 5:
+                            time_str = parts[4][:5]
+                    except Exception:
+                        pass
+
+                link = item.findtext("link", "").strip()
+                results.append({
+                    "title": title,
+                    "snippet": f"Latest update • {time_str}" if time_str else "Breaking news",
+                    "source": source or "MALAYALAM NEWS",
+                    "url": link,
+                    "time": time_str,
+                })
+    except Exception as e:
+        print(f"[WebSearch] Malayalam RSS fetch failed: {e}")
+
+    # Fallback to DDG query if RSS failed
+    if not results:
+        results = _ddg_news("kerala malayalam news headlines", max_results=max_results)
+    return results
+
 
 
 def _format_ddg(query: str, results: list[dict]) -> str:

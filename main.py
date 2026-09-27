@@ -1180,7 +1180,10 @@ class JarvisLive:
 
         # Start fetching news immediately — runs in parallel while phase 1 plays
         loop = asyncio.get_event_loop()
-        news_future = loop.run_in_executor(None, _fetch_news_sync, "top world news today")
+        is_malayalam = bool(lang and "malayalam" in lang.lower())
+        news_query = "kerala malayalam news headlines" if is_malayalam else "top world news today"
+        news_label = "NEWS — മലയാളം വാർത്തകൾ" if is_malayalam else "NEWS — top world news today"
+        news_future = loop.run_in_executor(None, _fetch_news_sync, news_query)
 
         await asyncio.sleep(0.3)
         if not self.session:
@@ -1257,7 +1260,7 @@ class JarvisLive:
                 )
                 if not failed:
                     # Show on UI content panel immediately
-                    self.ui.show_content("NEWS — top world news today", news_text)
+                    self.ui.show_content(news_label, news_text)
 
                     p2 = (
                         f"[BRIEFING] Here are today's top news headlines:\n{news_text}\n\n"

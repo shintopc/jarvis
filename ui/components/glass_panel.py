@@ -58,11 +58,10 @@ class GlassPanel(QFrame):
             title_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent; letter-spacing: 1px;")
             hdr_lay.addWidget(title_lbl)
 
-            if self._subtitle:
-                sub_lbl = QLabel(f"// {self._subtitle}")
-                sub_lbl.setFont(font_tech(7))
-                sub_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
-                hdr_lay.addWidget(sub_lbl)
+            self._sub_lbl = QLabel(f"// {self._subtitle}" if self._subtitle else "")
+            self._sub_lbl.setFont(font_tech(7))
+            self._sub_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
+            hdr_lay.addWidget(self._sub_lbl)
 
             hdr_lay.addStretch()
 
@@ -88,6 +87,11 @@ class GlassPanel(QFrame):
 
     def addWidget(self, widget: QWidget, stretch: int = 0):
         self._content_layout.addWidget(widget, stretch)
+
+    def set_subtitle(self, text: str):
+        self._subtitle = text
+        if hasattr(self, "_sub_lbl") and self._sub_lbl:
+            self._sub_lbl.setText(f"// {text}" if text else "")
 
     def paintEvent(self, event):
         p = QPainter(self)
