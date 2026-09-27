@@ -1,14 +1,15 @@
 """
 ui/components/news_panel.py — Futuristic Live Teleprompter News Feed for SHINTO — MARK LI.
 Features continuous upward-scrolling bullet headlines with channel-specific background colors,
-Malayalam news aggregation (Asianet, Manorama, Mathrubhumi, etc.), and interactive category filters.
+horizontal right-to-left marquee text for easy headline reading, Malayalam news aggregation,
+and interactive category filters.
 """
 from __future__ import annotations
 
 import threading
 import webbrowser
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QCursor
+from PyQt6.QtGui import QFont, QCursor, QPainter, QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QFrame, QSizePolicy
@@ -235,9 +236,96 @@ def get_channel_style(source_name: str) -> dict[str, str]:
     return style
 
 
+class MarqueeLabel(QWidget):
+    """
+    Smooth horizontal ticker marquee that scrolls text from right to left.
+    Loops seamlessly with a separator symbol if text exceeds available width.
+    """
+    def __init__(
+        self,
+        text: str,
+        font: QFont,
+        color: str = "#FFFFFF",
+        separator: str = "      ◈      ",
+        speed_ms: int = 30,
+        parent: QWidget | None = None
+    ):
+        super().__init__(parent)
+        self._text = text
+        self._font = font
+        self._color = color
+        self._separator = separator
+        self._offset = 0
+        self._paused = False
+
+        self.setFont(font)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(22)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Smooth ticker timer
+        self._timer = QTimer(self)
+        self._timer.setInterval(speed_ms)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def set_paused(self, paused: bool):
+        self._paused = paused
+
+    def _tick(self):
+        if self._paused or not self.isVisible():
+            return
+
+        fm = self.fontMetrics()
+        loop_text = self._text + self._separator
+        cycle_w = fm.horizontalAdvance(loop_text)
+        avail_w = self.width()
+
+        # If text fits easily without truncation, stay stationary
+        text_w = fm.horizontalAdvance(self._text)
+        if text_w <= avail_w:
+            if self._offset != 0:
+                self._offset = 0
+                self.update()
+            return
+
+        # Advance 1px from right to left
+        self._offset += 1
+        if self._offset >= cycle_w:
+            self._offset = 0
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        p.setFont(self._font)
+        p.setPen(QColor(self._color))
+
+        fm = self.fontMetrics()
+        avail_w = self.width()
+        text_w = fm.horizontalAdvance(self._text)
+        y = (self.height() + fm.ascent() - fm.descent()) // 2
+
+        if text_w <= avail_w:
+            # Fits completely: draw statically
+            p.drawText(0, y, self._text)
+        else:
+            # Marquee ticker loop: draw multiple instances to fill view
+            loop_text = self._text + self._separator
+            cycle_w = fm.horizontalAdvance(loop_text)
+            if cycle_w <= 0:
+                return
+
+            x = -self._offset
+            while x < avail_w:
+                p.drawText(x, y, loop_text)
+                x += cycle_w
+        p.end()
+
+
 class NewsBulletRow(QFrame):
     """
-    Sleek horizontal news bullet row with channel-specific background and glow.
+    Sleek horizontal news bullet row with channel-specific background and right-to-left marquee.
     """
     def __init__(
         self,
@@ -251,6 +339,7 @@ class NewsBulletRow(QFrame):
         self._url = url
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(34)
 
         style = get_channel_style(source)
         badge_name = style.get("badge", (source or "NEWS").upper())
@@ -266,12 +355,12 @@ class NewsBulletRow(QFrame):
             QFrame:hover {{
                 border-color: #FFFFFF;
                 border-left: 5px solid {style['border']};
-                background: rgba(255, 255, 255, 0.12);
+                background: rgba(255, 255, 255, 0.14);
             }}
         """)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 6, 12, 6)
+        lay.setContentsMargins(10, 4, 12, 4)
         lay.setSpacing(8)
 
         # Bullet marker
@@ -302,19 +391,18 @@ class NewsBulletRow(QFrame):
             time_lbl.setStyleSheet(f"color: {C.TEXT_MED}; border: none; background: transparent;")
             lay.addWidget(time_lbl)
 
-        # Headline text
-        title_lbl = QLabel(title)
-        title_lbl.setFont(font_body(9, bold=True))
-        title_lbl.setStyleSheet(f"color: {C.WHITE}; border: none; background: transparent;")
-        title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        title_lbl.setWordWrap(False)
-        lay.addWidget(title_lbl, stretch=1)
+        # Horizontal Marquee Headline (Right to Left)
+        self._marquee = MarqueeLabel(title, font_body(9, bold=True), color=C.WHITE, parent=self)
+        lay.addWidget(self._marquee, stretch=1)
 
         # Arrow indicator
         arrow = QLabel("↗")
         arrow.setFont(font_hud(8, bold=True))
         arrow.setStyleSheet(f"color: {style['bullet']}; border: none; background: transparent;")
         lay.addWidget(arrow)
+
+    def set_marquee_paused(self, paused: bool):
+        self._marquee.set_paused(paused)
 
     def mousePressEvent(self, e):
         if self._url:
@@ -324,7 +412,7 @@ class NewsBulletRow(QFrame):
 class AutoScrollArea(QScrollArea):
     """
     Vertical scroll area with continuous upward auto-scroll.
-    Automatically pauses when hovered so the user can read or click comfortably.
+    Automatically pauses upward scrolling when hovered so the user can read comfortably.
     """
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -355,10 +443,10 @@ class AutoScrollArea(QScrollArea):
             }}
         """)
 
-        # Upward scroll timer (~28 pixels/sec)
+        # Upward scroll timer (~26 pixels/sec)
         self._paused = False
         self._timer = QTimer(self)
-        self._timer.setInterval(35)
+        self._timer.setInterval(38)
         self._timer.timeout.connect(self._scroll_tick)
         self._timer.start()
 
@@ -378,12 +466,12 @@ class AutoScrollArea(QScrollArea):
             sb.setValue(curr + 1)
 
     def enterEvent(self, event):
-        # Pause auto-scroll on mouse hover
+        # Freeze vertical upward scroll on hover so the user can easily read and click
         self._paused = True
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        # Resume auto-scroll on mouse leave
+        # Resume vertical upward scroll on mouse leave
         self._paused = False
         super().leaveEvent(event)
 
@@ -400,7 +488,7 @@ class AutoScrollArea(QScrollArea):
 class NewsPanel(GlassPanel):
     """
     Futuristic World & Malayalam News Panel with continuous upward-scrolling bullet headlines.
-    Each channel features a distinct background color and interactive category filters.
+    Each channel features a distinct background color and right-to-left marquee headlines.
     """
     _news_loaded_sig = pyqtSignal(list, str)
 
@@ -432,7 +520,7 @@ class NewsPanel(GlassPanel):
 
         # Pause / Play toggle button
         self._btn_pause = QPushButton("⏸")
-        self._btn_pause.setToolTip("Pause / Resume continuous upward scroll")
+        self._btn_pause.setToolTip("Pause / Resume continuous scroll & marquee")
         self._btn_pause.setFont(font_tech(8, bold=True))
         self._btn_pause.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_pause.setStyleSheet(f"""
@@ -505,6 +593,11 @@ class NewsPanel(GlassPanel):
     def _on_toggle_scroll(self):
         is_running = self._scroll.toggle_play_pause()
         self._btn_pause.setText("⏸" if is_running else "▶")
+        # Sync marquee pause state with play/pause
+        for i in range(self._container_layout.count()):
+            item = self._container_layout.itemAt(i)
+            if item and item.widget() and hasattr(item.widget(), "set_marquee_paused"):
+                item.widget().set_marquee_paused(not is_running)
 
     def _update_cat_button_styles(self):
         for cat_id, btn in self._cat_btns.items():
@@ -576,7 +669,7 @@ class NewsPanel(GlassPanel):
             self._show_status("No news stories available at the moment. Click ⟳ to retry.")
             return
 
-        # Duplicate items to create an infinite seamless loop
+        # Duplicate items to create an infinite seamless vertical loop
         display_items = items + items
 
         for it in display_items:
