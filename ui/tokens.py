@@ -112,36 +112,65 @@ def qcol(h: str, a: int = 255) -> QColor:
 
 
 # Font helpers
-def font_hud(size: int = 8, bold: bool = True) -> QFont:
-    f = QFont("Orbitron", size)
-    f.setStyleHint(QFont.StyleHint.Monospace)
-    f.setBold(bold)
-    if not f.exactMatch():
-        f = QFont("Rajdhani", size)
+def _resolve_font(
+    candidates: list[str],
+    size: int,
+    bold: bool = False,
+    monospace: bool = False,
+    min_size: int = 8,
+) -> QFont:
+    """Resolve the first available font from candidates with legibility scaling."""
+    # Scale up micro sizes (< 9) so text isn't microscopic on modern high-DPI displays
+    effective_size = max(min_size, size + 1 if size <= 8 else size)
+    for fam in candidates:
+        f = QFont(fam, effective_size)
+        if monospace:
+            f.setStyleHint(QFont.StyleHint.Monospace)
+        else:
+            f.setStyleHint(QFont.StyleHint.SansSerif)
         f.setBold(bold)
-        if not f.exactMatch():
-            f = QFont("Courier New", size)
-            f.setBold(bold)
+        if f.exactMatch():
+            return f
+
+    # Fallback to system default with style hint
+    f = QFont(candidates[0], effective_size)
+    if monospace:
+        f.setStyleHint(QFont.StyleHint.Monospace)
+    else:
+        f.setStyleHint(QFont.StyleHint.SansSerif)
+    f.setBold(bold)
     return f
 
 
-def font_tech(size: int = 8, bold: bool = False) -> QFont:
-    f = QFont("JetBrains Mono", size)
-    f.setStyleHint(QFont.StyleHint.Monospace)
-    f.setBold(bold)
-    if not f.exactMatch():
-        f = QFont("Consolas", size)
-        f.setBold(bold)
-        if not f.exactMatch():
-            f = QFont("Courier New", size)
-            f.setBold(bold)
-    return f
+def font_hud(size: int = 9, bold: bool = True) -> QFont:
+    """Tactical HUD / header font: crisp, geometric, highly legible."""
+    return _resolve_font(
+        candidates=["Bahnschrift", "Segoe UI", "Rajdhani", "Arial"],
+        size=size,
+        bold=bold,
+        monospace=False,
+        min_size=8,
+    )
 
 
-def font_body(size: int = 9, bold: bool = False) -> QFont:
-    f = QFont("Space Grotesk", size)
-    f.setBold(bold)
-    if not f.exactMatch():
-        f = QFont("Segoe UI", size)
-        f.setBold(bold)
-    return f
+def font_tech(size: int = 9, bold: bool = False) -> QFont:
+    """Technical / telemetry / code monospace: sharp character distinctions."""
+    return _resolve_font(
+        candidates=["Cascadia Code", "Consolas", "Cascadia Mono", "JetBrains Mono", "Segoe UI"],
+        size=size,
+        bold=bold,
+        monospace=True,
+        min_size=8,
+    )
+
+
+def font_body(size: int = 10, bold: bool = False) -> QFont:
+    """Primary UI body / label font: ergonomic, clear reading flow."""
+    return _resolve_font(
+        candidates=["Segoe UI", "Inter", "Roboto", "Arial"],
+        size=size,
+        bold=bold,
+        monospace=False,
+        min_size=9,
+    )
+
