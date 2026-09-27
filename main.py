@@ -578,6 +578,7 @@ class JarvisLive:
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
+        self._pending_text_commands: list[str] = []  # commands queued while session is connecting
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
@@ -640,14 +641,42 @@ class JarvisLive:
         return url, key, f"{url}/auto-login?key={key}", manual
 
     def _on_text_command(self, text: str):
-        if not self._loop or not self.session:
+        if not text or not text.strip():
             return
-        asyncio.run_coroutine_threadsafe(
-            self.session.send_client_content(
-                turns={"parts": [{"text": text}]},
-                turn_complete=True
-            ),
-            self._loop
+        clean_text = text.strip()
+        if not self._loop or not self.session:
+            self.ui.write_log(f"SYS: JARVIS core connecting... command queued: \"{clean_text[:40]}\"")
+            self._pending_text_commands.append(clean_text)
+            return
+
+        self.ui.set_state("THINKING")
+
+        async def _send():
+            try:
+                # If JARVIS is currently speaking, stop previous speech cleanly so query is handled immediately
+                if self._is_speaking:
+                    self.interrupt()
+
+                await self.session.send_client_content(
+                    turns=[
+                        types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(text=clean_text)]
+                        )
+                    ],
+                    turn_complete=True
+                )
+                print(f"[JARVIS] 💬 Text query dispatched: {clean_text}")
+            except Exception as e:
+                print(f"[JARVIS] ❌ Text command dispatch error: {e}")
+                traceback.print_exc()
+                self.ui.write_log(f"ERR: Failed to dispatch command — {e}")
+                if not self.ui.muted:
+                    self.ui.set_state("LISTENING")
+
+        fut = asyncio.run_coroutine_threadsafe(_send(), self._loop)
+        fut.add_done_callback(
+            lambda f: print(f"[JARVIS] Text command execution error: {f.exception()}") if f.exception() else None
         )
 
     def set_speaking(self, value: bool):
@@ -678,15 +707,24 @@ class JarvisLive:
         self.ui.write_log("SYS: Interrupted — listening...")
 
     def speak(self, text: str):
-        if not self._loop or not self.session:
+        if not self._loop or not self.session or not text:
             return
-        asyncio.run_coroutine_threadsafe(
-            self.session.send_client_content(
-                turns={"parts": [{"text": text}]},
-                turn_complete=True
-            ),
-            self._loop
-        )
+
+        async def _do_speak():
+            try:
+                await self.session.send_client_content(
+                    turns=[
+                        types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(text=text)]
+                        )
+                    ],
+                    turn_complete=True
+                )
+            except Exception as e:
+                print(f"[JARVIS] Speak error: {e}")
+
+        asyncio.run_coroutine_threadsafe(_do_speak(), self._loop)
 
     def speak_error(self, tool_name: str, error: str):
         short = str(error)[:120]
@@ -736,8 +774,8 @@ class JarvisLive:
 
         cfg = dict(
             response_modalities=["AUDIO"],
-            output_audio_transcription={},
-            input_audio_transcription={},
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": TOOL_DECLARATIONS + self._plugin_registry.get_tool_declarations()}],
             session_resumption=types.SessionResumptionConfig(),
@@ -1012,9 +1050,17 @@ class JarvisLive:
                     if response.server_content:
                         sc = response.server_content
 
+                        # Capture text from model_turn if present
+                        if sc.model_turn and sc.model_turn.parts:
+                            for p in sc.model_turn.parts:
+                                if p.text and not getattr(p, "thought", False):
+                                    txt = _clean_transcript(p.text)
+                                    if txt and (not out_buf or txt != out_buf[-1]):
+                                        out_buf.append(txt)
+
                         if sc.output_transcription and sc.output_transcription.text:
                             txt = _clean_transcript(sc.output_transcription.text)
-                            if txt and txt != (out_buf[-1] if out_buf else ""):
+                            if txt and (not out_buf or txt != out_buf[-1]):
                                 out_buf.append(txt)
 
                         if sc.input_transcription and sc.input_transcription.text:
@@ -1047,7 +1093,7 @@ class JarvisLive:
                                     }))
                             in_buf = []
 
-                            full_out = " ".join(out_buf).strip()
+                            full_out = re.sub(r"\s+", " ", " ".join(out_buf)).strip()
                             if full_out:
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
@@ -1058,6 +1104,9 @@ class JarvisLive:
                                         "ts": datetime.now().isoformat(),
                                     }))
                             out_buf = []
+
+                            if not self.ui.muted and not self._is_speaking:
+                                self.ui.set_state("LISTENING")
 
                             # Vision injection: model finished tool-response turn → now send the image
                             if self._pending_vision and self.session:
@@ -1517,6 +1566,13 @@ class JarvisLive:
                     print("[JARVIS] Connected.")
                     self.ui.set_state("LISTENING")
                     self.ui.write_log("SYS: JARVIS online.")
+
+                    # Flush any pending text commands submitted during startup or reconnect
+                    if self._pending_text_commands:
+                        _pending = list(self._pending_text_commands)
+                        self._pending_text_commands.clear()
+                        for _pcmd in _pending:
+                            self._on_text_command(_pcmd)
 
                     if self._dashboard:
                         await self._dashboard.broadcast({"type": "status", "state": "active"})

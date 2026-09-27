@@ -168,5 +168,6 @@ class ChatView(QWidget):
         if not txt:
             return
         self._input.clear()
+        self._last_sent_user_msg = txt
         self.add_message("YOU", txt)
         self.message_sent.emit(txt)

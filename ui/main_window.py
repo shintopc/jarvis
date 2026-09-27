@@ -328,11 +328,20 @@ class MainWindow(QMainWindow):
         if not text:
             return
         self.view_dashboard.activity_log.append_log(f"You: {text}")
+        self.view_dashboard.command_console.set_processing_status(text[:36])
+        self._on_state("THINKING")
+
+        # Sync user query to Chat View if not already originated there
+        if getattr(self.view_chat, "_last_sent_user_msg", None) != text:
+            self.view_chat.add_message("YOU", text)
+        self.view_chat._last_sent_user_msg = None
+
         if self.on_text_command:
             threading.Thread(target=self.on_text_command, args=(text,), daemon=True).start()
 
     def _dispatch_interrupt(self):
         self.view_dashboard.activity_log.append_log("SYS: Interrupt requested [ESC].")
+        self.view_dashboard.command_console.set_processing_status("")
         if self.on_interrupt:
             try:
                 self.on_interrupt()
@@ -367,9 +376,19 @@ class MainWindow(QMainWindow):
 
     def _on_log(self, text: str):
         self.view_dashboard.activity_log.append_log(text)
-        if text.startswith("JARVIS:") or text.startswith("SHINTO:"):
-            msg = text.split(":", 1)[-1].strip()
-            self.view_chat.add_message(self._assistant_name, msg)
+        if ":" in text:
+            prefix, msg = text.split(":", 1)
+            prefix_up = prefix.strip().upper()
+            msg = msg.strip()
+            if prefix_up in (self._assistant_name.upper(), "JARVIS", "SHINTO"):
+                self.view_chat.add_message(self._assistant_name, msg)
+                self.view_dashboard.command_console.set_processing_status("")
+            elif prefix_up in ("YOU", "USER"):
+                if getattr(self.view_chat, "_last_sent_user_msg", None) != msg:
+                    self.view_chat.add_message("YOU", msg)
+                self.view_chat._last_sent_user_msg = None
+        elif any(k in text.lower() for k in ("interrupt", "error", "err:")):
+            self.view_dashboard.command_console.set_processing_status("")
 
     def _on_state(self, state: str):
         self.view_dashboard.set_state(state)
