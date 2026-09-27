@@ -119,9 +119,8 @@ def _get_ddgs():
     except ImportError:
         from duckduckgo_search import DDGS
         print(
-            "[WebSearch] ⚠️ Using the deprecated 'duckduckgo-search' package — "
-            "DuckDuckGo blocks its endpoints, so every search will come back "
-            "empty.  Fix with:  pip install -U ddgs"
+            "[WebSearch] [WARN] Using deprecated 'duckduckgo-search' package. "
+            "DuckDuckGo may block endpoints. Fix with: pip install -U ddgs"
         )
         return DDGS
 
@@ -138,7 +137,7 @@ def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
                     "url":     r.get("href",   ""),
                 })
     except Exception as e:
-        print(f"[WebSearch] ⚠️ DDG text() failed: {e}")
+        print(f"[WebSearch] DDG text() failed: {e}")
     return results
 
 
@@ -217,6 +216,79 @@ def _fetch_malayalam_news(max_results: int = 10) -> list[dict]:
     # Fallback to DDG query if RSS failed
     if not results:
         results = _ddg_news("kerala malayalam news headlines", max_results=max_results)
+    return results
+
+
+def _fetch_category_news(category: str = "malayalam", max_results: int = 15) -> list[dict]:
+    """
+    Fetches real-time structured news via Google News RSS for:
+    - 'malayalam': Kerala & Malayalam news (Asianet, Manorama, Mathrubhumi, etc.)
+    - 'india': National headlines (The Hindu, Indian Express, NDTV, Times of India)
+    - 'world': Global headlines (BBC, Reuters, AP, CNN)
+    - 'tech': Technology & AI headlines (Verge, TechCrunch, Wired)
+    """
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    import html
+
+    feeds = {
+        "malayalam": "https://news.google.com/rss?hl=ml&gl=IN&ceid=IN:ml",
+        "india":     "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
+        "world":     "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en",
+        "tech":      "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
+    }
+
+    url = feeds.get(category.lower(), feeds["malayalam"])
+    results = []
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            data = resp.read()
+            root = ET.fromstring(data)
+            for item in root.findall(".//item")[:max_results]:
+                raw_title = html.unescape(item.findtext("title", "")).strip()
+                source = html.unescape(item.findtext("source", "")).strip()
+                if " - " in raw_title:
+                    title = raw_title.rsplit(" - ", 1)[0].strip()
+                    if not source:
+                        source = raw_title.rsplit(" - ", 1)[1].strip()
+                else:
+                    title = raw_title
+
+                pub_date = item.findtext("pubDate", "").strip()
+                time_str = ""
+                if pub_date:
+                    try:
+                        parts = pub_date.split()
+                        if len(parts) >= 5:
+                            time_str = parts[4][:5]
+                    except Exception:
+                        pass
+
+                link = item.findtext("link", "").strip()
+                results.append({
+                    "title": title,
+                    "snippet": f"Updated • {time_str}" if time_str else "Breaking news",
+                    "source": source or (category.upper() + " NEWS"),
+                    "url": link,
+                    "time": time_str,
+                })
+    except Exception as e:
+        print(f"[WebSearch] RSS category '{category}' fetch failed: {e}")
+
+    # Fallback to DDG if RSS failed
+    if not results:
+        queries = {
+            "malayalam": "kerala malayalam news headlines",
+            "india":     "top national news headlines india today",
+            "world":     "top world news headlines today",
+            "tech":      "latest technology ai news headlines",
+        }
+        q = queries.get(category.lower(), "top news today")
+        results = _ddg_news(q, max_results=max_results)
     return results
 
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 import webbrowser
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -158,6 +158,22 @@ CHANNEL_THEMES: dict[str, dict[str, str]] = {
         "bullet": "#82B1FF",
         "badge": "THE HINDU",
     },
+    "times of india": {
+        "bg": "rgba(194, 24, 91, 0.30)",
+        "border": "#F06292",
+        "badge_bg": "#AD1457",
+        "badge_text": "#FFFFFF",
+        "bullet": "#F48FB1",
+        "badge": "TIMES OF INDIA",
+    },
+    "hindustan times": {
+        "bg": "rgba(0, 131, 143, 0.30)",
+        "border": "#4DD0E1",
+        "badge_bg": "#00838F",
+        "badge_text": "#FFFFFF",
+        "bullet": "#80DEEA",
+        "badge": "HINDUSTAN TIMES",
+    },
     "reuters": {
         "bg": "rgba(230, 81, 0, 0.28)",
         "border": "#FF9100",
@@ -165,6 +181,30 @@ CHANNEL_THEMES: dict[str, dict[str, str]] = {
         "badge_text": "#FFFFFF",
         "bullet": "#FFD180",
         "badge": "REUTERS",
+    },
+    "verge": {
+        "bg": "rgba(142, 36, 170, 0.30)",
+        "border": "#BA68C8",
+        "badge_bg": "#7B1FA2",
+        "badge_text": "#FFFFFF",
+        "bullet": "#CE93D8",
+        "badge": "THE VERGE",
+    },
+    "techcrunch": {
+        "bg": "rgba(46, 125, 50, 0.30)",
+        "border": "#81C784",
+        "badge_bg": "#2E7D32",
+        "badge_text": "#FFFFFF",
+        "bullet": "#A5D6A7",
+        "badge": "TECHCRUNCH",
+    },
+    "wired": {
+        "bg": "rgba(33, 33, 33, 0.40)",
+        "border": "#B0BEC5",
+        "badge_bg": "#424242",
+        "badge_text": "#FFFFFF",
+        "bullet": "#CFD8DC",
+        "badge": "WIRED",
     },
 }
 
@@ -188,7 +228,10 @@ def get_channel_style(source_name: str) -> dict[str, str]:
     # Deterministic palette hash for unseen channels
     idx = abs(hash(s_lower)) % len(FALLBACK_PALETTES)
     style = FALLBACK_PALETTES[idx].copy()
-    style["badge"] = (source_name.upper() if source_name else "LIVE NEWS")
+    clean_badge = (source_name.upper() if source_name else "LIVE NEWS")
+    if len(clean_badge) > 20:
+        clean_badge = clean_badge[:18] + ".."
+    style["badge"] = clean_badge
     return style
 
 
@@ -436,17 +479,28 @@ class NewsPanel(GlassPanel):
         self._container_layout.setContentsMargins(4, 4, 4, 4)
         self._container_layout.setSpacing(6)
 
-        # Placeholder loading state
-        self._loading_lbl = QLabel("Scanning Malayalam live feeds (Asianet, Manorama, Mathrubhumi...)...")
-        self._loading_lbl.setFont(font_tech(8))
-        self._loading_lbl.setStyleSheet(f"color: {C.TEXT_MED}; padding: 10px;")
-        self._container_layout.addWidget(self._loading_lbl)
-
         self._scroll.setWidget(self._container)
         self.addWidget(self._scroll)
 
         # Initial fetch
         self.fetch_news()
+
+    def _clear_container(self):
+        """Safely clear container without leaving dangling pointers."""
+        while self._container_layout.count():
+            item = self._container_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+    def _show_status(self, text: str):
+        """Display an informational status/loading message safely."""
+        self._clear_container()
+        lbl = QLabel(text)
+        lbl.setFont(font_tech(8))
+        lbl.setStyleSheet(f"color: {C.TEXT_MED}; padding: 10px;")
+        self._container_layout.addWidget(lbl)
 
     def _on_toggle_scroll(self):
         is_running = self._scroll.toggle_play_pause()
@@ -492,26 +546,18 @@ class NewsPanel(GlassPanel):
 
     def fetch_news(self):
         cat = self._current_cat
-        cat_display = "Malayalam live feeds" if cat == "malayalam" else f"{cat.upper()} feeds"
-        self._loading_lbl.setText(f"Scanning {cat_display} (Asianet, Manorama, Mathrubhumi...)...")
-        self._loading_lbl.show()
+        cat_names = {
+            "malayalam": "Malayalam live feeds (Asianet, Manorama, Mathrubhumi...)",
+            "india": "National Indian feeds (The Hindu, Indian Express, NDTV...)",
+            "world": "Global world feeds (BBC, Reuters, AP, CNN...)",
+            "tech": "Technology & AI feeds (Verge, TechCrunch, Wired...)",
+        }
+        self._show_status(f"Scanning {cat_names.get(cat, cat.upper() + ' feeds')}...")
 
         def _worker():
             try:
-                items = []
-                if cat == "malayalam":
-                    from actions.web_search import _fetch_malayalam_news
-                    items = _fetch_malayalam_news(max_results=16)
-                elif cat == "world":
-                    from actions.web_search import _ddg_news
-                    items = _ddg_news("top world news today", max_results=12)
-                elif cat == "india":
-                    from actions.web_search import _ddg_news
-                    items = _ddg_news("top national news headlines india today", max_results=12)
-                elif cat == "tech":
-                    from actions.web_search import _ddg_news
-                    items = _ddg_news("latest technology news headlines", max_results=12)
-
+                from actions.web_search import _fetch_category_news
+                items = _fetch_category_news(cat, max_results=16)
                 self._news_loaded_sig.emit(items or [], cat)
             except Exception as e:
                 print(f"[NewsPanel] Error fetching {cat} news: {e}")
@@ -520,20 +566,14 @@ class NewsPanel(GlassPanel):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _on_news_loaded(self, items: list[dict], cat: str):
+        # Ignore responses if category switched during fetch
         if cat != self._current_cat:
             return
 
-        # Clear existing container rows
-        while self._container_layout.count():
-            item = self._container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        self._clear_container()
 
         if not items:
-            lbl = QLabel("No news stories available at the moment. Click ⟳ to retry.")
-            lbl.setFont(font_tech(8))
-            lbl.setStyleSheet(f"color: {C.TEXT_DIM}; padding: 10px;")
-            self._container_layout.addWidget(lbl)
+            self._show_status("No news stories available at the moment. Click ⟳ to retry.")
             return
 
         # Duplicate items to create an infinite seamless loop
@@ -542,7 +582,7 @@ class NewsPanel(GlassPanel):
         for it in display_items:
             row = NewsBulletRow(
                 title=it.get("title", "News Headline"),
-                source=it.get("source", "MALAYALAM NEWS"),
+                source=it.get("source", (cat.upper() + " NEWS")),
                 url=it.get("url", ""),
                 time_str=it.get("time", "")
             )
