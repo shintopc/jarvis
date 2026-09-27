@@ -190,14 +190,14 @@ class DashboardView(QWidget):
         self._center_splitter.addWidget(self._core_cam_stack)
 
         # Collapsible Briefing Content Panel
-        self._content_panel = GlassPanel(title="INTELLIGENCE BRIEFING", subtitle="DATA SYNTHESIS")
+        self._content_panel = GlassPanel(title="ഇന്റലിജൻസ് ബ്രീഫിംഗ്", subtitle="തത്സമയ വിവരങ്ങൾ (MALAYALAM BRIEFING)")
         self._content_display = QTextEdit()
         self._content_display.setReadOnly(True)
-        self._content_display.setFont(font_tech(8))
+        self._content_display.setFont(font_body(9))
         self._content_display.setStyleSheet(f"""
             QTextEdit {{
                 background: {C.DARK}; color: {C.TEXT};
-                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 6px;
+                border: 1px solid {C.BORDER}; border-radius: 3px; padding: 8px; line-height: 1.4;
             }}
         """)
         self._content_panel.addWidget(self._content_display)
@@ -260,6 +260,6 @@ class DashboardView(QWidget):
         self.command_console.set_muted(muted)
 
     def show_content(self, title: str, text: str):
-        self._content_panel._title = title.upper()
+        self._content_panel.set_title(title)
         self._content_display.setPlainText(text)
         self._content_panel.show()

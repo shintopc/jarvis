@@ -53,10 +53,10 @@ class GlassPanel(QFrame):
             hdr_lay.addWidget(marker)
 
             # Title
-            title_lbl = QLabel(self._title.upper())
-            title_lbl.setFont(font_hud(8, bold=True))
-            title_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent; letter-spacing: 1px;")
-            hdr_lay.addWidget(title_lbl)
+            self._title_lbl = QLabel(self._title.upper())
+            self._title_lbl.setFont(font_hud(8, bold=True))
+            self._title_lbl.setStyleSheet(f"color: {C.PRI}; background: transparent; letter-spacing: 1px;")
+            hdr_lay.addWidget(self._title_lbl)
 
             self._sub_lbl = QLabel(f"// {self._subtitle}" if self._subtitle else "")
             self._sub_lbl.setFont(font_tech(7))
@@ -87,6 +87,11 @@ class GlassPanel(QFrame):
 
     def addWidget(self, widget: QWidget, stretch: int = 0):
         self._content_layout.addWidget(widget, stretch)
+
+    def set_title(self, text: str):
+        self._title = text
+        if hasattr(self, "_title_lbl") and self._title_lbl:
+            self._title_lbl.setText(text.upper())
 
     def set_subtitle(self, text: str):
         self._subtitle = text

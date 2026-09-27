@@ -1180,18 +1180,15 @@ class JarvisLive:
 
         # Start fetching news immediately — runs in parallel while phase 1 plays
         loop = asyncio.get_event_loop()
-        is_malayalam = bool(lang and "malayalam" in lang.lower())
-        news_query = "kerala malayalam news headlines" if is_malayalam else "top world news today"
-        news_label = "NEWS — മലയാളം വാർത്തകൾ" if is_malayalam else "NEWS — top world news today"
-        news_future = loop.run_in_executor(None, _fetch_news_sync, news_query)
+        news_label = "ഇന്റലിജൻസ് ബ്രീഫിംഗ് — പ്രധാന വാർത്തകൾ"
+        news_future = loop.run_in_executor(None, _fetch_news_sync, "kerala malayalam news headlines")
 
         await asyncio.sleep(0.3)
         if not self.session:
             return
 
-        # ── Phase 1: instant greeting ─────────────────────────────────────────
-        lang_clause = f" Respond in {lang}." if lang else ""
-        name_clause = f" Address the user as {name}." if name else ""
+        # ── Phase 1: instant greeting in Malayalam ───────────────────────────
+        user_name = name or "Shinto"
 
         # Inject last session context if available — pop removes it so it's never repeated
         last = await asyncio.to_thread(pop_last_session)
@@ -1199,16 +1196,18 @@ class JarvisLive:
         if last:
             try:
                 _delta = (datetime.now() - datetime.strptime(last["date"], "%Y-%m-%d")).days
-                _when  = "earlier today" if _delta == 0 else ("yesterday" if _delta == 1 else f"{_delta} days ago")
+                _when  = "ഇന്ന് നേരത്തെ" if _delta == 0 else ("ഇന്നലെ" if _delta == 1 else f"{_delta} ദിവസങ്ങൾക്ക് മുൻപ്")
             except Exception:
-                _when = "last time"
+                _when = "കഴിഞ്ഞ തവണ"
             session_clause = (
-                f" Also briefly and naturally mention that {_when}: {last['summary']}"
+                f" Also briefly mention in Malayalam that {_when}: {last['summary']}"
             )
 
         p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
-            f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
+            f"Greet the user warmly in Malayalam (മലയാളത്തിൽ സംസാരിക്കുക). "
+            f"Mention the current time is {time_str} and that you are preparing today's Malayalam news briefing now.{session_clause} "
+            f"Address the user as {user_name}. "
+            "Keep it to 2 short natural sentences in Malayalam only. Do not speak in English. Do not call any tools."
         )
 
         # Clear the turn-done event so we can wait for Phase 1 to finish
@@ -1219,13 +1218,11 @@ class JarvisLive:
             turns={"parts": [{"text": p1}]},
             turn_complete=True,
         )
-        self.ui.write_log("SYS: Briefing phase 1 (greeting) sent.")
+        self.ui.write_log("SYS: Briefing phase 1 (greeting) sent in Malayalam.")
 
         # ── Phase 2: fire as soon as Phase 1 audio is done ───────────────────
         async def _deliver_news():
             try:
-                lang_str = f" Respond in {lang}." if lang else ""
-
                 # Wait for news fetch (already running) and Phase 1 turn-complete
                 # in parallel — whichever takes longer determines the wait time
                 news_done   = asyncio.wrap_future(news_future)
@@ -1237,10 +1234,6 @@ class JarvisLive:
                     except asyncio.TimeoutError:
                         pass
 
-                # Extra buffer: turn_complete fires when Gemini finishes *generating*
-                # Phase 1, but audio may still be playing.  Waiting a beat here
-                # prevents Phase 2 audio from arriving while Phase 1 is mid-sentence
-                # (which sounds like a "repeated first response" to the user).
                 if turn_waited:
                     await asyncio.sleep(0.8)
                 else:
@@ -1256,31 +1249,33 @@ class JarvisLive:
                     return
 
                 failed = (not news_text) or news_text.startswith(
-                    ("No news found", "Search failed", "Please provide")
+                    ("No news found", "Search failed", "Please provide", "മലയാളം വാർത്തകൾ ഇപ്പോൾ ലഭ്യമായില്ല")
                 )
                 if not failed:
-                    # Show on UI content panel immediately
+                    # Show on UI content panel immediately in Malayalam
                     self.ui.show_content(news_label, news_text)
 
                     p2 = (
-                        f"[BRIEFING] Here are today's top news headlines:\n{news_text}\n\n"
-                        "Pick ONE headline, summarise it in one sentence, then say the full list "
-                        f"is displayed on screen. Do not call any tools.{lang_str}"
+                        f"[BRIEFING] Here are today's top Malayalam news headlines:\n{news_text}\n\n"
+                        "You MUST speak strictly in natural Malayalam (മലയാളത്തിൽ സംസാരിക്കുക). "
+                        "Pick ONE top headline, summarise it clearly in one natural Malayalam sentence, "
+                        "then say that the full Malayalam headlines are displayed on the intelligence screen. "
+                        "Do not call any tools. Do not speak in English."
                     )
                 else:
                     self.ui.write_log(
                         f"SYS: News unavailable — backend returned: {news_text[:120]!r}"
                     )
                     p2 = (
-                        "News headlines could not be fetched right now. "
-                        f"Let the user know briefly.{lang_str}"
+                        "ഇന്നത്തെ പ്രധാന വാർത്തകൾ ഇപ്പോൾ ലഭ്യമായില്ല എന്ന് ഉപയോക്താവിനോട് പറയുക. "
+                        "Speak strictly in Malayalam. Keep it to one short sentence. Do not call any tools."
                     )
 
                 await self.session.send_client_content(
                     turns={"parts": [{"text": p2}]},
                     turn_complete=True,
                 )
-                self.ui.write_log("SYS: Briefing phase 2 (news) sent.")
+                self.ui.write_log("SYS: Briefing phase 2 (Malayalam news) sent.")
             except Exception as e:
                 print(f"[Briefing] Phase 2 error: {e}")
                 self.ui.write_log(f"SYS: Briefing phase 2 failed: {e}")

@@ -376,21 +376,32 @@ def _search(query: str) -> str:
         return _format_ddg(query, results)
 
 
-def _news(query: str) -> str:
-    """
-    DDG first, Gemini as backup.
+def _format_malayalam_news(results: list[dict]) -> str:
+    if not results:
+        return "മലയാളം വാർത്തകൾ ഇപ്പോൾ ലഭ്യമായില്ല."
+    lines = ["ഇന്നത്തെ പ്രധാന മലയാളം വാർത്തകൾ:\n"]
+    for i, r in enumerate(results, 1):
+        title = r.get("title", "")
+        if not title:
+            continue
+        src = f"  [{r['source']}]" if r.get("source") else ""
+        time_str = f"  ({r['time']})" if r.get("time") else ""
+        lines.append(f"{i}. {title}{src}{time_str}")
+        lines.append("")
+    return "\n".join(lines).strip()
 
-    The old version raced both backends in parallel and kept the first answer.
-    That burned one google_search grounding call on *every* news request —
-    including the startup briefing — even when DDG had already won the race.
-    Grounding has a small quota, so it ran dry after a handful of launches and
-    then 429'd for everything else (research/compare), which are the modes that
-    actually need a synthesised answer.
 
-    DDG news returns in well under a second and gives raw headlines, which is
-    exactly what the briefing wants, so it goes first and Gemini is only touched
-    when DDG comes back empty.
+def _news(query: str = "") -> str:
     """
+    Fetches real-time news headlines. If query is related to Malayalam/Kerala,
+    fetches live Malayalam RSS feeds. Otherwise queries DDG with Gemini fallback.
+    """
+    is_ml = any(k in (query or "").lower() for k in ["malayalam", "kerala", "മലയാളം"])
+    if is_ml or not query:
+        ml_items = _fetch_malayalam_news(max_results=8)
+        if ml_items:
+            return _format_malayalam_news(ml_items)
+
     gemini_query = f"latest news today: {query}" if query else "top world news today"
     ddg_query    = query if query else "world news today"
 
