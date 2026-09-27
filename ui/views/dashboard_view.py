@@ -206,7 +206,7 @@ class DashboardView(QWidget):
 
         # News Panel
         self.news_panel = NewsPanel()
-        self.news_panel.setMinimumHeight(110)
+        self.news_panel.setMinimumHeight(140)
         self._center_splitter.addWidget(self.news_panel)
 
         self._center_splitter.setStretchFactor(0, 5)
